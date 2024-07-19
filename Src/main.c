@@ -27,6 +27,9 @@ void init_tasks_stack(void);
 void enable_processor_faults(void);
 __attribute__((naked)) void switch_sp_to_psp(void);
 uint32_t get_psp_value(void);
+void update_next_task(void);
+void save_psp_value(uint32_t current_psp_value);
+
 
 //global variables: PSP tracker and LR addresses for tasks
 
@@ -156,6 +159,15 @@ uint32_t get_psp_value(void){
 	return psp_of_tasks[current_task];
 }
 
+void save_psp_value(uint32_t current_psp_value){
+	psp_of_tasks[current_task] = current_psp_value;
+}
+
+void update_next_task(void){ //update tasks in a round robin fashion
+	current_task++;
+	current_task = current_task % MAX_TASKS;
+}
+
 __attribute__((naked)) void switch_sp_to_psp(void){
 
 	//1. initialize PSP first, with Task 1 stack start since it will be launched first
@@ -177,9 +189,36 @@ __attribute__((naked)) void switch_sp_to_psp(void){
 	__asm volatile ("BX LR"); // return to main
 }
 
-void SysTick_Handler(void){
-	//context switching
+__attribute__((naked)) void SysTick_Handler(void){ //handler mode -> MSP
+
+	//1. Save the context of the current task
+
+	__asm volatile("MRS R0,PSP"); //get the current PSP value
+
+	__asm volatile("STMDB R0!,{R4-R11}"); //stmdb decrements, then stores register. This is to save the stack frame r4 - r11
+
+	__asm volatile("PUSH {LR}"); //save LR value before branching to new function in the next line.
+
+	__asm volatile("BL save_psp_value"); // save the psp value.
+
+
+
+	//2. Retrieve the context of the next task
+
+	__asm volatile("BL update_next_task"); //decide the next task
+
+	__asm volatile("BL get_psp_value"); //get the next task's psp value
+	// R0 holds the new psp value
+
+	__asm volatile("LDMIA R0!,{R4-R11}"); //load multiple registers and increment pointer after, this is to retrieve the next task's stack frame (r4-r11)
+
+	__asm volatile("MSR PSP,R0"); //update the new psp and exit
+
+	__asm volatile("POP {LR}");
+
+	__asm volatile("BX LR"); //exit sequence
 }
+
 
 //fault handlers
 
