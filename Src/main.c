@@ -31,6 +31,7 @@ uint32_t get_psp_value(void);
 void update_next_task(void);
 void save_psp_value(uint32_t current_psp_value);
 
+void task_delay(uint32_t tick_count);
 
 //global variables:
 
@@ -64,7 +65,9 @@ int main(void)
 	for(;;);
 }
 
-// Function body
+void idle_task(void){
+	while(1);
+}
 
 void task1_handler(void){
 	while(1){
@@ -139,16 +142,22 @@ void init_tasks_stack(void){
 	user_tasks[1].current_state = TASK_RUNNING_STATE;
 	user_tasks[2].current_state = TASK_RUNNING_STATE;
 	user_tasks[3].current_state = TASK_RUNNING_STATE;
+	user_tasks[4].current_state = TASK_RUNNING_STATE;
 
-	user_tasks[0].psp_value = T1_STACK_START;
-	user_tasks[1].psp_value = T2_STACK_START;
-	user_tasks[2].psp_value = T3_STACK_START;
-	user_tasks[3].psp_value = T4_STACK_START;
 
-	user_tasks[0].task_handler = task1_handler;
-	user_tasks[1].task_handler = task2_handler;
-	user_tasks[2].task_handler = task3_handler;
-	user_tasks[3].task_handler = task4_handler;
+	user_tasks[0].psp_value = IDLE_STACK_START;
+	user_tasks[1].psp_value = T1_STACK_START;
+	user_tasks[2].psp_value = T2_STACK_START;
+	user_tasks[3].psp_value = T3_STACK_START;
+	user_tasks[4].psp_value = T4_STACK_START;
+
+
+	user_tasks[0].task_handler = idle_task;
+	user_tasks[1].task_handler = task1_handler;
+	user_tasks[2].task_handler = task2_handler;
+	user_tasks[3].task_handler = task3_handler;
+	user_tasks[4].task_handler = task4_handler;
+
 
 
 	uint32_t *pPSP;
@@ -219,6 +228,11 @@ __attribute__((naked)) void switch_sp_to_psp(void){
 	__asm volatile ("BX LR"); // return to main
 }
 
+void task_delay(uint32_t tick_count){
+	user_tasks[current_task].block_count = g_tick_count + tick_count;
+	user_tasks[current_task].current_state = TASK_BLOCKED_STATE;
+
+}
 __attribute__((naked)) void SysTick_Handler(void){ //handler mode -> MSP
 
 	//1. Save the context of the current task
