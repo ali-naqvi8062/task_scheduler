@@ -30,12 +30,15 @@ __attribute__((naked)) void switch_sp_to_psp(void);
 uint32_t get_psp_value(void);
 void update_next_task(void);
 void save_psp_value(uint32_t current_psp_value);
-
+void update_global_tick_count(void);
 void task_delay(uint32_t tick_count);
+void unblock_tasks(void);
+void schedule(void);
 
 //global variables:
 
-uint8_t current_task = 0; //denotes current task running on CPU
+uint8_t current_task = 1; //denotes current task running on CPU
+uint32_t g_tick_count = 0;
 
 typedef struct{
 	uint32_t psp_value;
@@ -203,8 +206,18 @@ void save_psp_value(uint32_t current_psp_value){
 }
 
 void update_next_task(void){ //update tasks in a round robin fashion
-	current_task++;
-	current_task = current_task % MAX_TASKS;
+	int state = TASK_BLOCKED_STATE;
+
+	for(int i = 0; i < MAX_TASKS; i++){
+		current_task++;
+		current_task %= MAX_TASKS;
+		state = user_tasks[current_task].current_state;
+		if((state == TASK_RUNNING_STATE) && (current_task!=0))
+			break;
+	}
+
+	if(state!=TASK_RUNNING_STATE) // in the scenario where all tasks are blocked, the idle state will run.
+		current_task = 0;
 }
 
 __attribute__((naked)) void switch_sp_to_psp(void){
@@ -228,12 +241,34 @@ __attribute__((naked)) void switch_sp_to_psp(void){
 	__asm volatile ("BX LR"); // return to main
 }
 
-void task_delay(uint32_t tick_count){
-	user_tasks[current_task].block_count = g_tick_count + tick_count;
-	user_tasks[current_task].current_state = TASK_BLOCKED_STATE;
-
+void schedule(void){
+	uint32_t* pICSR = (uint32_t*)0xE000ED04;
+	*pICSR |= (1<<28);
 }
-__attribute__((naked)) void SysTick_Handler(void){ //handler mode -> MSP
+
+void task_delay(uint32_t tick_count){
+	if(current_task){
+		user_tasks[current_task].block_count = g_tick_count + tick_count;
+		user_tasks[current_task].current_state = TASK_BLOCKED_STATE;
+		schedule(); //schedule the PendSV
+	}
+}
+
+void update_global_tick_count(void){
+	g_tick_count++;
+}
+
+void unblock_tasks(void){
+	for(int i = 0; i < MAX_TASKS; i++){
+		if(user_tasks[i].current_state != TASK_RUNNING_STATE){
+			if(user_tasks[i].block_count == g_tick_count){
+				user_tasks[i].current_state = TASK_RUNNING_STATE;
+			}
+		}
+	}
+}
+
+__attribute__((naked)) void PendSV_Handler(void){ //handler mode -> MSP
 
 	//1. Save the context of the current task
 
@@ -263,6 +298,16 @@ __attribute__((naked)) void SysTick_Handler(void){ //handler mode -> MSP
 	__asm volatile("BX LR"); //exit sequence
 }
 
+void SysTick_Handler(void){
+
+	uint32_t* pICSR = (uint32_t*)0xE000ED04; // pointer to ICSR register
+
+	update_global_tick_count();
+	unblock_tasks();
+
+	//pend the PendSV exception:
+	*pICSR |= (1<<28);
+}
 
 //fault handlers
 
